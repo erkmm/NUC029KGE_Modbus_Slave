@@ -17,7 +17,7 @@
 #define PLLCTL_SETTING  CLK_PLLCTL_72MHz_HXT
 #define PLL_CLOCK       72000000
 
-#define RXBUFSIZE 1024
+#define RXBUFSIZE 256
 
 /*---------------------------------------------------------------------------------------------------------*/
 /* Global variables                                                                                        */
@@ -39,11 +39,9 @@ void UART_FunctionTest(void);
 
 void SYS_Init(void)
 {
-
     /*---------------------------------------------------------------------------------------------------------*/
     /* Init System Clock                                                                                       */
     /*---------------------------------------------------------------------------------------------------------*/
-
     /* Enable HIRC clock (Internal RC 22.1184MHz) */
     CLK->PWRCTL |= CLK_PWRCTL_HIRCEN_Msk;
 
@@ -74,10 +72,10 @@ void SYS_Init(void)
     CyclesPerUs     = PLL_CLOCK / 1000000;  // For CLK_SysTickDelay()
 
     /* Enable UART module clock */
-    CLK->APBCLK0 |= CLK_APBCLK0_UART0CKEN_Msk;
+    CLK->APBCLK0 |= CLK_APBCLK0_UART0CKEN_Msk|CLK_APBCLK0_TMR0CKEN_Msk;
 
     /* Select UART module clock source as HXT and UART module clock divider as 1 */
-    CLK->CLKSEL1 = (CLK->CLKSEL1 & (~CLK_CLKSEL1_UARTSEL_Msk)) | CLK_CLKSEL1_UARTSEL_HXT;
+    CLK->CLKSEL1 = (CLK->CLKSEL1 & (~CLK_CLKSEL1_UARTSEL_Msk)) | CLK_CLKSEL1_UARTSEL_HXT | CLK_CLKSEL1_TMR0SEL_HXT;
     CLK->CLKDIV0 = (CLK->CLKDIV0 & (~CLK_CLKDIV0_UARTDIV_Msk)) | CLK_CLKDIV0_UART(1);
 
     /*---------------------------------------------------------------------------------------------------------*/
@@ -88,6 +86,24 @@ void SYS_Init(void)
     SYS->GPA_MFPL &= ~(SYS_GPA_MFPL_PA2MFP_Msk | SYS_GPA_MFPL_PA3MFP_Msk);
     SYS->GPA_MFPL |= (SYS_GPA_MFPL_PA3MFP_UART0_RXD | SYS_GPA_MFPL_PA2MFP_UART0_TXD);
 }
+
+void Timer_Init(void){
+    TIMER0->CMP = __HXT;
+    TIMER0->CTL = TIMER_CTL_INTEN_Msk | TIMER_PERIODIC_MODE;
+    TIMER_SET_PRESCALE_VALUE(TIMER0, 2);
+    NVIC_EnableIRQ(TMR0_IRQn);
+    TIMER_Start(TIMER0);
+}
+
+void TMR0_IRQHandler(void){
+	if(TIMER_GetIntFlag(TIMER0) == 1)
+	    {
+	        /* Clear Timer0 time-out interrupt flag */
+	        TIMER_ClearIntFlag(TIMER0);
+	        UART_Write(UART0, g_u8RecData, 8);
+ }
+}
+
 
 void UART0_Init()
 {
@@ -122,17 +138,15 @@ int32_t main(void)
     /* Lock protected registers */
     SYS_LockReg();
 
+	Timer_Init();
+
     /* Init UART0 for printf and test */
     UART0_Init();
 
-    //printf("\n\nCPU @ %d Hz\n", SystemCoreClock);
-
-    //printf("\nUART Sample Program\n");
-
-    /* UART sample function */
-    //UART_FunctionTest();
-
-    while(1);
+    while(1){
+//    	UART_Write(UART0,g_u8RecData,8);
+//    	for(volatile int t=0; t < 0x10000; t++){}
+    }
 
 }
 
@@ -155,7 +169,6 @@ void UART_TEST_HANDLE()
 
     if((u32IntSts & UART_INTSTS_RDAINT_Msk)) //|| (u32IntSts & UART_INTSTS_RXTOINT_Msk))
     {
-       // printf("\nInput:");
     	int index = 0;
 
         /* Get all the input characters */
@@ -174,7 +187,6 @@ void UART_TEST_HANDLE()
                 index++;
             }
         }
-       // printf("\nTransmission Test:");
     }
     if(u32IntSts & UART_INTSTS_THREINT_Msk)
     {
@@ -183,8 +195,8 @@ void UART_TEST_HANDLE()
         if(g_u32comRhead != tmp)
         {
             fifotx = g_u8RecData[g_u32comRhead];
-            while(UART_IS_TX_FULL(UART0));  /* Wait Tx is not full to transmit data */
-            UART_WRITE(UART0, fifotx);
+           while(UART_IS_TX_FULL(UART0));  /* Wait Tx is not full to transmit data */
+           // UART_Write(UART0, g_u8RecData, 8);
             g_u32comRhead = (g_u32comRhead == (RXBUFSIZE - 1)) ? 0 : (g_u32comRhead + 1);
             g_u32comRbytes--;
         }
@@ -196,20 +208,6 @@ void UART_TEST_HANDLE()
 /*---------------------------------------------------------------------------------------------------------*/
 void UART_FunctionTest()
 {
-//    printf("+-----------------------------------------------------------+\n");
-//    printf("|  UART Function Test                                       |\n");
-//    printf("+-----------------------------------------------------------+\n");
-//    printf("|  Description :                                            |\n");
-//    printf("|    The sample code will print input char on terminal      |\n");
-//    printf("|    Please enter any to start     (Press '0' to exit)      |\n");
-//    printf("+-----------------------------------------------------------+\n");
-
-    /*
-        Using a RS232 cable to connect UART0 and PC.
-        UART0 is set to debug port. UART0 is enable RDA and RLS interrupt.
-        When inputting char to terminal screen, RDA interrupt will happen and
-        UART0 will print the received char on screen.
-    */
 
     /* Enable UART RDA and THRE Interrupt */
 
@@ -219,6 +217,4 @@ void UART_FunctionTest()
     UART0->INTEN &= ~(UART_INTEN_RDAIEN_Msk | UART_INTEN_THREIEN_Msk);
     NVIC_DisableIRQ(UART02_IRQn);
     g_bWait = TRUE;
-    //printf("\nUART Sample Demo End.\n");
-
 }
